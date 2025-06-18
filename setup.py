@@ -54,10 +54,9 @@ def read(fname):
 setup(
     name=PACKAGE_NAME,
     version="{}.{}.{}".format (VER_MAJOR, VER_MINOR, VER_MAINT),
-    # version="{}.{}.{}.{}{}".format(VER_MAJOR, VER_MINOR, VER_MAINT,VER_PREREL,VER_LOCAL),
-    author="SecureAuth Corporation",
-    maintainer="Fortra",
-    license="Apache modified",
+    author="Yuk1k4z3",
+    maintainer="Yuk1k4z3",
+    license="Apache License",
     long_description=read('README.md'),
     long_description_content_type="text/markdown",
     platforms=["Unix", "Windows"],
@@ -66,9 +65,8 @@ setup(
     data_files=data_files,
 
     install_requires=['impacket', 'tqdm'],
-    extras_require={':sys_platform=="win32"': ['pyreadline3'],
-                    },
     classifiers=[
+        "Programming Language :: Python :: 3.13",
         "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.10",
