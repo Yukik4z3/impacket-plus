@@ -26,12 +26,14 @@ import cmd
 import os
 import ntpath
 import re
+import json
+from platform import android_ver
 
 from six import PY2
 from impacket.dcerpc.v5 import samr, transport, srvs
 from impacket.dcerpc.v5.dtypes import NULL
 from impacket import LOG
-from impacket.smbconnection import SMBConnection, SMB2_DIALECT_002, SMB2_DIALECT_21, SMB_DIALECT, SessionError, \
+from impacket_plus.smbconnection import SMBConnection, SMB2_DIALECT_002, SMB2_DIALECT_21, SMB_DIALECT, SessionError, \
     FILE_READ_DATA, FILE_SHARE_READ, FILE_SHARE_WRITE
 from impacket.smb3structs import FILE_DIRECTORY_FILE, FILE_LIST_DIRECTORY
 from tqdm import tqdm
@@ -39,11 +41,12 @@ from tqdm import tqdm
 import charset_normalizer as chardet
 
 class TqdmFileWrapper:
-    def __init__(self, file_obj, total_size):
+    def __init__(self, file_obj, total_size, initial_pos=0):
         self.file_obj = file_obj
         # 自定义格式：文件大小显示两位小数，速度显示整数
         self.pbar = tqdm(
             total=total_size,
+            initial=initial_pos,  # 设置初始位置
             unit='B',
             unit_scale=True,
             unit_divisor=1024,  # 使用1024而不是1000作为单位换算
@@ -56,7 +59,6 @@ class TqdmFileWrapper:
     def _setup_custom_format(self):
         """设置自定义的大小和速度格式"""
         original_format_sizeof = tqdm.format_sizeof
-        original_format_interval = tqdm.format_interval
 
         def custom_format_sizeof(num, suffix='', divisor=1024):
             """自定义文件大小格式，显示两位小数"""
@@ -71,6 +73,7 @@ class TqdmFileWrapper:
 
     def write(self, data):
         self.file_obj.write(data)
+        self.file_obj.flush()
         self.pbar.update(len(data))
 
     def close(self):
@@ -79,6 +82,15 @@ class TqdmFileWrapper:
 
     def __getattr__(self, name):
         return getattr(self.file_obj, name)
+
+def compare_meta_data(meta_file, file_mtime, file_ctime, file_size):
+    with open(meta_file) as f:
+        meta_data = json.load(f)
+        if file_mtime ==  meta_data['file_mtime'] and \
+            file_ctime == meta_data['file_ctime'] and \
+            file_size == meta_data['file_size']:
+            return True
+    return False
 
 def smb_getAllDir(smbConnection :SMBConnection, shareName, path, base_dir=''):
     obj = smbConnection.listPath(shareName, path)[0]
@@ -90,14 +102,36 @@ def smb_getAllDir(smbConnection :SMBConnection, shareName, path, base_dir=''):
             smb_getAllDir(smbConnection, shareName, f'{path}\\{i.get_longname()}', os.path.join(base_dir, obj.get_longname()))
     else:
             file_size = obj.get_allocsize()
+            file_mtime = obj.get_mtime()
+            file_ctime = obj.get_ctime()
+            offset = 0
+            final_path = f'{base_dir}/{obj.get_longname()}'
+            temp_path = f'{base_dir}/{obj.get_longname()}.tmp'
             print("[+] Getting file:", path)
-            with open(f'{base_dir}/{obj.get_longname()}', 'wb') as f:
-                wrapped_file = TqdmFileWrapper(f, file_size)
+            mode = 'wb'
+            if os.path.exists(temp_path) and os.path.exists(final_path + '.meta'):
+                if compare_meta_data(final_path + '.meta', file_mtime, file_ctime, file_size)\
+                        and os.path.getsize(temp_path) < file_size:
+                    mode = 'ab'
+                    offset = os.path.getsize(temp_path)
+                else:
+                    os.remove(temp_path)
+                    os.remove(final_path + '.meta')
+            with open(final_path + '.meta', 'w') as f:
+                meta_data = {
+                    'file_size': file_size,
+                    'file_mtime': file_mtime,
+                    'file_ctime': file_ctime,
+                }
+                json.dump(meta_data, f)
+            with open(temp_path, mode) as f:
+                wrapped_file = TqdmFileWrapper(f, file_size, offset)
                 try:
-                    smbConnection.getFile(shareName, path, wrapped_file.write)
+                    smbConnection.getFile(shareName, path, wrapped_file.write, offset)
+                    os.rename(temp_path, final_path)
+                    os.remove(final_path + '.meta')
                 except Exception as e:
                     print("[-] Error: " + str(e))
-                    os.remove(f'{base_dir}/{obj.get_longname()}')
 
 class MiniImpacketShell(cmd.Cmd):
     def __init__(self, smbClient, tcpShell=None, outputfile=None):
@@ -372,6 +406,16 @@ class MiniImpacketShell(cmd.Cmd):
         print("Server Comment: %s" % resp['InfoStruct']['ServerInfo102']['sv102_comment'])
         print("Server UserPath: %s" % resp['InfoStruct']['ServerInfo102']['sv102_userpath'])
         print("Simultaneous Users: %d" % resp['InfoStruct']['ServerInfo102']['sv102_users'])
+        dialect = self.smb.getDialect()
+        if dialect == SMB_DIALECT:
+            dialect = "SMBv1"
+        elif dialect == SMB2_DIALECT_002:
+            dialect = "SMBv2.0"
+        elif dialect == SMB2_DIALECT_21:
+            dialect = "SMBv2.1"
+        else:
+            dialect = "SMBv3.0"
+        print('SMB dialect in use: %s' % dialect)
 
     def do_who(self, line):
         if self.loggedIn is False:
@@ -704,7 +748,7 @@ class MiniImpacketShell(cmd.Cmd):
             LOG.error("No share selected")
             return
         pathname = ntpath.join(self.pwd,filename)
-        smb_getAllDir(self.smb, self.share, pathname)
+        smb_getAllDir(self.smb, self.share, pathname, os.getcwd())
 
     def complete_cat(self, text, line, begidx, endidx):
         return self.complete_get(text, line, begidx, endidx, include=1)

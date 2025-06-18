@@ -28,7 +28,7 @@ from impacket.examples import logger
 from impacket.examples.utils import parse_target
 from impacket_plus.examples.smbclient import MiniImpacketShell
 from impacket import version
-from impacket.smbconnection import SMBConnection
+from impacket_plus.smbconnection import SMBConnection
 
 def main():
     print(version.BANNER)
