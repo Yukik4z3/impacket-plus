@@ -107,6 +107,8 @@ def smb_getAllDir(smbConnection :SMBConnection, shareName, path, base_dir=''):
             offset = 0
             final_path = f'{base_dir}/{obj.get_longname()}'
             temp_path = f'{base_dir}/{obj.get_longname()}.tmp'
+            if os.path.exists(final_path):
+                return
             print("[+] Getting file:", path)
             mode = 'wb'
             if os.path.exists(temp_path) and os.path.exists(final_path + '.meta'):
