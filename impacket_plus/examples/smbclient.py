@@ -41,7 +41,7 @@ from tqdm import tqdm
 import charset_normalizer as chardet
 
 class TqdmFileWrapper:
-    def __init__(self, file_obj, total_size, initial_pos=0):
+    def __init__(self, file_obj, total_size, initial_pos=0, is_upload=False):
         self.file_obj = file_obj
         # 自定义格式：文件大小显示两位小数，速度显示整数
         self.pbar = tqdm(
@@ -50,7 +50,7 @@ class TqdmFileWrapper:
             unit='B',
             unit_scale=True,
             unit_divisor=1024,  # 使用1024而不是1000作为单位换算
-            desc="Downloading",
+            desc="Downloading" if not is_upload else "Uploading",
             bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]'
         )
         # 设置自定义格式函数
@@ -223,10 +223,10 @@ class MiniImpacketShell(cmd.Cmd):
  lls {dirname} - lists all the files on the local filesystem.
  search {keywords} - Search for files containing the specified keywords in the current directory and all subdirectories. Use /regex pattern/ to search with a regular expression.
  tree {filepath[,output][:depth]} - recursively lists all files in folder and sub folders, if give output, save output to file, use depth to set list depth
- rm {file} - removes the selected file
+ rm {file[,filename2][,filename3][...]} - removes the selected file
  mkdir {dirname} - creates the directory under the current path
  rmdir {dirname} - removes the directory under the current path
- put {filename} - uploads the filename into the current path
+ put {filename[,filename2][,filename3][...]} - uploads the filename into the current path
  get {filename/path} - downloads the filename/path from the current path
  mget {mask} - downloads all files from the current directory matching the provided mask
  cat {filename} - reads the filename from the current path
@@ -669,9 +669,19 @@ class MiniImpacketShell(cmd.Cmd):
         if self.tid is None:
             LOG.error("No share selected")
             return
-        f = ntpath.join(self.pwd, filename)
-        file = f.replace('/','\\')
-        self.smb.deleteFile(self.share, file)
+        file_list = filename.split(',')
+        for filename in file_list:
+            try:
+                f = ntpath.join(self.pwd, filename)
+                file = f.replace('/','\\')
+                self.smb.deleteFile(self.share, file)
+            except SessionError as e:
+                if e.getErrorCode() == 0xc0000034:
+                    print(f'[-] File {filename} is not exist')
+                else:
+                    raise e
+            except Exception as e:
+                raise e
 
     def do_mkdir(self, path):
         if self.tid is None:
@@ -693,15 +703,23 @@ class MiniImpacketShell(cmd.Cmd):
         if self.tid is None:
             LOG.error("No share selected")
             return
-        src_path = pathname
-        dst_name = os.path.basename(src_path)
+        file_list = pathname.split(',')
+        for pathname in file_list:
+            try:
+                src_path = pathname
+                dst_name = os.path.basename(src_path)
 
-        with open(pathname, 'rb') as fh:
-            file_size = os.path.getsize(pathname)
-            wrapped_file = TqdmFileWrapper(fh, file_size)
-            f = ntpath.join(self.pwd,dst_name)
-            finalpath = f.replace('/','\\')
-            self.smb.putFile(self.share, finalpath, wrapped_file.read)
+                with open(pathname, 'rb') as fh:
+                    file_size = os.path.getsize(pathname)
+                    wrapped_file = TqdmFileWrapper(fh, file_size, is_upload=True)
+                    f = ntpath.join(self.pwd,dst_name)
+                    finalpath = f.replace('/','\\')
+                    self.smb.putFile(self.share, finalpath, wrapped_file.read)
+            except FileNotFoundError:
+                print(f"[-] File '{pathname}' not found")
+            except Exception as e:
+                raise e
+
 
     def complete_get(self, text, line, begidx, endidx, include = 1):
         # include means

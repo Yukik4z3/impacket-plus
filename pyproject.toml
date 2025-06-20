@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "impacket-plus"
+dynamic = ["version"]
+readme = "README.md"
+license = {text = "Apache-2.0"}
+authors = [
+    { name = "Yuk1k4z3" },
+]
+dependencies = [
+    "impacket",
+    "tqdm",
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "impacket_plus.__version__"}
+
+[tool.setuptools]
+packages = {find = {}}
+
+[tool.setuptools.package-data]
+"*" = ["*.py"]
