@@ -76,6 +76,11 @@ class TqdmFileWrapper:
         self.file_obj.flush()
         self.pbar.update(len(data))
 
+    def read(self, size):
+        data = self.file_obj.read(size)
+        self.pbar.update(len(data))
+        return data
+
     def close(self):
         self.pbar.close()
         self.file_obj.close()
@@ -691,11 +696,12 @@ class MiniImpacketShell(cmd.Cmd):
         src_path = pathname
         dst_name = os.path.basename(src_path)
 
-        fh = open(pathname, 'rb')
-        f = ntpath.join(self.pwd,dst_name)
-        finalpath = f.replace('/','\\')
-        self.smb.putFile(self.share, finalpath, fh.read)
-        fh.close()
+        with open(pathname, 'rb') as fh:
+            file_size = os.path.getsize(pathname)
+            wrapped_file = TqdmFileWrapper(fh, file_size)
+            f = ntpath.join(self.pwd,dst_name)
+            finalpath = f.replace('/','\\')
+            self.smb.putFile(self.share, finalpath, wrapped_file.read)
 
     def complete_get(self, text, line, begidx, endidx, include = 1):
         # include means
